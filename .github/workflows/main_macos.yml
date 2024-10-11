@@ -1,0 +1,220 @@
+name: MacOS - Build, Test, and Upload
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - v*
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build and Upload Artifact
+    runs-on: macos-14
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.11"]
+
+    env:
+      # package versions are set in github actions variables:
+      #   settings - secrets and variables - actions - variables
+      PETSC_ARCH: arch-darwin-c-opt
+      PETSC_VERSION: ${{ vars.PETSC_VERSION }}
+      PETSC_FLAGS: -O2 # C, CXX, F
+
+      # store libraries in here
+      LIB_DIR: ${{ github.workspace }}
+
+      PETSC_BASE_URL: ${{ vars.PETSC_BASE_URL }}
+
+    if: ${{ startsWith(github.ref, 'refs/tags') || !contains(github.event.head_commit.message, '[skip ci]') || !contains(github.event.head_commit.message, '[skip macos ci]') }}
+
+    steps:
+      # checkout repository
+      # checkout@v4 does not seem to work with containers
+      # https://github.com/actions/checkout/issues/1474
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Python - set up ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Python - install dependencies
+      run: |
+
+        # Install build dependencies manually and use --no-build-isolation
+        # We do this to avoid building against numpy 2 as the numpy version is
+        # not specified in petsc4py's requires section
+        pip install cibuildwheel
+
+        # cpython version string representation, e.g., 3.11 -> cp311
+        PYTHON_VERSION_STR=$(python -c "import sys; print(f'cp{sys.version_info.major}{sys.version_info.minor}')")
+        echo "PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> $GITHUB_ENV
+
+    - name: Homebrew - install packages
+      # make is installed as gmake
+      run: brew upgrade && brew install make && brew cleanup
+
+    - name: PETSc - set variables
+      run: |
+
+        PETSC_NAME=petsc-${PETSC_VERSION}
+        PETSC_TAR=${PETSC_NAME}.tar.gz
+        PETSC_DIR=${LIB_DIR}/${PETSC_NAME}
+
+        echo "PETSC_TAR=${PETSC_TAR}" >> $GITHUB_ENV
+        echo "PETSC_DIR=${PETSC_DIR}" >> $GITHUB_ENV
+        echo "PETSC4PY_DIR=${PETSC_DIR}/src/binding/petsc4py" >> $GITHUB_ENV
+
+    - name: PETSc - restore (cache)
+      uses: actions/cache/restore@v4
+      id: cache-petsc
+      with:
+        path: ${{ env.PETSC_DIR }}
+        key: ${{ runner.os }}-petsc
+
+    - name: PETSc - build
+      if: ${{ steps.cache-petsc.outputs.cache-hit != 'true' }}
+      run: |
+
+        curl -O -L ${PETSC_BASE_URL}/${PETSC_TAR}
+        tar -xzf ${PETSC_TAR} -C ${LIB_DIR}
+        cd ${PETSC_DIR}
+
+        python configure \
+        --PETSC_ARCH=${PETSC_ARCH} \
+        --COPTFLAGS=${PETSC_FLAGS} \
+        --CXXOPTFLAGS=${PETSC_FLAGS} \
+        --FOPTFLAGS=${PETSC_FLAGS} \
+        --with-fc=gfortran-14 \
+        --with-fortran-bindings=0 \
+        --with-debugging=0 \
+        --with-make-exec=gmake \
+        --with-mpi=1 --download-mpich \
+        --with-hypre=1 --download-hypre \
+        --download-mumps --download-scalapack --download-metis \
+        --with-shared-library=1
+
+        gmake all
+        gmake check
+
+    - name: PETSc - save (cache)
+      uses: actions/cache/save@v4
+      if: ${{ steps.cache-petsc.outputs.cache-hit != 'true' }}
+      with:
+        path: ${{ env.PETSC_DIR }}
+        key: ${{ runner.os }}-petsc
+
+    - name: petsc4py - build
+      run: |
+
+        echo "Using PETSC_DIR   ${PETSC_DIR}"
+        echo "Using PETSC_ARCH  ${PETSC_ARCH}"
+
+        WHEEL_DIR=${PETSC4PY_DIR}/wheelhouse
+
+        # otools -L /path/to/.dylib
+
+        # This gives major AND minor, e.g. 14.5 or whatever
+        # MAJOR_MAC_VERSION=$(sw_vers -productVersion | cut -d '.' -f 1,2)
+        # echo "major mac version ${MAJOR_MAC_VERSION}"
+        # echo "MAJOR_MAC_VERSION=${MAJOR_MAC_VERSION}" >> $GITHUB_ENV
+
+        # build wheel using cibuildwheel
+        # as of now, we don't really use any features of cibw so it is a bit
+        # overkill, however, it does ensure that an arm64 wheel is built if
+        # the host machine has this arch. Just building the wheel using python
+        # and pip directly will result in a universal2 built which is invalid
+        # because PETSc is compiled only for arm64.
+        # cibw achieves this by setting the ARCHFLAGS env var to arm64 instead
+        # of having arm64 and x86_64
+        # One caveat of cibw is that on arm64 macs it defaults to setting
+        # MACOSX_DEPLOYMENT_TARGET to 11.0 which is the minimum target that
+        # is supported on arm64 machines. However, currently we build on 14.0
+        # so I set this manually for now.
+        cibuildwheel --output-dir ${WHEEL_DIR} ${PETSC4PY_DIR}
+
+        # petsc4py-3.21.3-cp311-cp311-macosx-14_0_arm64.whl
+        WHEEL_FILENAME=${WHEEL_DIR}/*.whl
+
+        echo "WHEEL_DIR=${WHEEL_DIR}" >> $GITHUB_ENV
+        echo "WHEEL_FILENAME=${WHEEL_FILENAME}" >> $GITHUB_ENV
+
+      env:
+        CIBW_BUILD: ${{ env.PYTHON_VERSION_STR }}-*
+        CIBW_BEFORE_BUILD: "pip install cython numpy==1.26 setuptools"
+        CIBW_BUILD_FRONTEND: "pip; args: --no-build-isolation" # additional args
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+    - name: petsc4py - install
+      run: pip install ${WHEEL_FILENAME}
+
+    - name: petsc4py - test
+      run: python ${PETSC4PY_DIR}/test/runtests.py --summary --no-builddir
+
+    - name: Artifact - upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-wheels
+        path: ${{ env.WHEEL_DIR }}/*.whl
+
+  test:
+    name: Test
+    needs: build
+    runs-on: macos-14
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.11"]
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Artifact - download
+      uses: actions/download-artifact@v4
+      with:
+        name: macos-wheels
+        path: ${{ github.workspace }}
+    - name: Python - set up ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Python - install packages
+      run: |
+        pip install numpy==1.26 pytest scipy
+        pip install --no-index --find-links $GITHUB_WORKSPACE petsc4py
+    - name: petsc4py - test
+      run: pytest tests -v
+
+  publish:
+    name: Publish
+    needs: test
+    permissions:
+      contents: write
+    # OS not important here
+    runs-on: macos-14
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+    - name: Artifact - download
+      uses: actions/download-artifact@v4
+      with:
+        name: macos-wheels
+        path: ${{ github.workspace }}
+    - name: Artifact - Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ${{ github.workspace }}/*.whl
+
+    # - name: Upload to PyPI
+    #   if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags') }}
+    #   run: |
+    #     $PYTHON -m pip install twine
+    #     $PYTHON -m twine upload wheelhouse/*.whl -u __token__ -p "$PASSWORD"
+    #   env:
+    #     PASSWORD: ${{ secrets.PYPI_TOKEN }}
+    #     PYTHON: /opt/python/cp38-cp38/bin/python
+
+
