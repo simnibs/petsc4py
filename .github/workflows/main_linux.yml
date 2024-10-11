@@ -16,7 +16,6 @@ jobs:
       fail-fast: true
       matrix:
         python-version: ["3.11"]
-
     container:
     # https://github.com/pypa/manylinux
     # NOTE: Intel MKL is incompatible with manylinux2014
@@ -274,6 +273,10 @@ jobs:
     name: Test
     needs: build
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.11"]
     container:
       image: quay.io/pypa/${{ vars.MANYLINUX_PLATFORM }}
     steps:
@@ -302,7 +305,7 @@ jobs:
 
   publish:
     name: Publish
-    needs: build
+    needs: test
     permissions:
       contents: write
     runs-on: ubuntu-latest
