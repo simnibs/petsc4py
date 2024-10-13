@@ -27,9 +27,6 @@ jobs:
       PETSC_VERSION: ${{ vars.PETSC_VERSION }}
       PETSC_FLAGS: -O2 # C, CXX, F
 
-      # store libraries in here
-      LIB_DIR: ${{ github.workspace }}
-
       PETSC_BASE_URL: ${{ vars.PETSC_BASE_URL}}
       HYPRE_BASE_URL: https://github.com/hypre-space/hypre/archive/refs/tags
       MSMPI_BASE_URL: https://download.microsoft.com/download/A/E/0/AE002626-9D9D-448D-8197-1EA510E297CE
@@ -234,8 +231,12 @@ jobs:
       run: |
 
         # cpython version string representation, e.g., 3.11 -> cp311
-        $pythonVersionStr = python -c "import sys; print(f'cp{sys.version_info.major}{sys.version_info.minor}')"
-        echo "pythonVersionStr=$pythonVersionStr" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+        # $py_tag = python -c "import sys; print(f'cp{sys.version_info.major}{sys.version_info.minor}')"
+        $py_tag = python -c 'from wheel.vendored.packaging import tags; print(f"{tags.interpreter_name()}{tags.interpreter_version()}", end="")'
+        echo "py_tag=$py_tag" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+
+        $wheel_name = python tools/construct_wheel_name.py petsc4py $PETSC_VERSION
+        echo "wheel_name=$wheel_name" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
 
         # Flags from petscvariables are not read (unless GCC was used) so we
         # need to set them manually
@@ -271,15 +272,12 @@ jobs:
     - name: petsc4py - fix wheel
       run: |
 
-        set WHEEL_NAME=petsc4py-%PETSC_VERSION%-%pythonVersionStr%-%pythonVersionStr%-win_amd64.whl
-        echo WHEEL_NAME=%WHEEL_NAME%>> %GITHUB_ENV%
-
         REM Show dependencies that needs to be vendored into the wheel
         delvewheel show --analyze-existing --add-path %PETSC_DIR%\%PETSC_ARCH%\lib;%HYPRE_INSTALL_DIR%\bin %WHEEL_DIR%\%WHEEL_NAME%
 
         REM Unpack -> vendor DLLs in -> patch -> repack
 
-        wheel unpack -d %WHEEL_DIR% %WHEEL_DIR%\%WHEEL_NAME%
+        wheel unpack -d %WHEEL_DIR% %WHEEL_DIR%\%wheel_name%
         set UNPACK_DIR=%WHEEL_DIR%\petsc4py-%PETSC_VERSION%
 
         echo Copy DLLs into wheel
@@ -299,7 +297,8 @@ jobs:
         delvewheel show --analyze-existing --add-path %PETSC_DIR%\%PETSC_ARCH%\lib;%HYPRE_INSTALL_DIR%\bin %WHEEL_DIR%\%WHEEL_NAME%
 
     - name: petsc4py - install
-      run: pip install %WHEEL_DIR%\%WHEEL_NAME%
+      # run: pip install %WHEEL_DIR%\%WHEEL_NAME%
+      run: pip install --no-index --find-links %WHEEL_DIR% petsc4py
 
     - name: petsc4py - test
       run: python %PETSC4PY_DIR%\test\runtests.py --summary --no-builddir
@@ -337,9 +336,10 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Python - install packages
       shell: pwsh
+      # Get-ChildItem petsc4py*.whl | foreach {pip install $_.FullName}
       run: |
         pip install mkl==${{ vars.MKL_VERSION }} numpy==1.26 pytest scipy
-        Get-ChildItem petsc4py*.whl | foreach {pip install $_.FullName}
+        pip install --no-index --find-links $Env:GITHUB_WORKSPACE petsc4py
     - name: petsc4py - test
       run: pytest tests -v
 

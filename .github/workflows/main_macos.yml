@@ -8,9 +8,17 @@ on:
   pull_request:
     branches: [ main ]
 
+
+env:
+  # package versions are set in github actions variables:
+  #   settings - secrets and variables - actions - variables
+  PETSC_ARCH: arch-darwin-c-opt
+  PETSC_NAME: petsc-${{ vars.PETSC_VERSION }}
+  PETSC_DIR: ${{ github.workspace }}/petsc-${{ vars.PETSC_VERSION }}
+
 jobs:
-  build:
-    name: Build and Upload Artifact
+  build-petsc:
+    name: Build PETSc
     runs-on: macos-14
     strategy:
       fail-fast: true
@@ -18,14 +26,7 @@ jobs:
         python-version: ["3.11"]
 
     env:
-      # package versions are set in github actions variables:
-      #   settings - secrets and variables - actions - variables
-      PETSC_ARCH: arch-darwin-c-opt
-      PETSC_VERSION: ${{ vars.PETSC_VERSION }}
       PETSC_FLAGS: -O2 # C, CXX, F
-
-      # store libraries in here
-      LIB_DIR: ${{ github.workspace }}
 
       PETSC_BASE_URL: ${{ vars.PETSC_BASE_URL }}
 
@@ -49,26 +50,17 @@ jobs:
         # Install build dependencies manually and use --no-build-isolation
         # We do this to avoid building against numpy 2 as the numpy version is
         # not specified in petsc4py's requires section
-        pip install cibuildwheel
+        pip install cibuildwheel wheel
 
         # cpython version string representation, e.g., 3.11 -> cp311
-        PYTHON_VERSION_STR=$(python -c "import sys; print(f'cp{sys.version_info.major}{sys.version_info.minor}')")
-        echo "PYTHON_VERSION_STR=${PYTHON_VERSION_STR}" >> $GITHUB_ENV
+        # py_tag=$(python -c "import sys; print(f'cp{sys.version_info.major}{sys.version_info.minor}')")
+        py_tag=$(python -c 'from wheel.vendored.packaging import tags; print(f"{tags.interpreter_name()}{tags.interpreter_version()}", end="")')
+
+        echo "py_tag=${py_tag}" >> $GITHUB_ENV
 
     - name: Homebrew - install packages
       # make is installed as gmake
       run: brew upgrade && brew install make && brew cleanup
-
-    - name: PETSc - set variables
-      run: |
-
-        PETSC_NAME=petsc-${PETSC_VERSION}
-        PETSC_TAR=${PETSC_NAME}.tar.gz
-        PETSC_DIR=${LIB_DIR}/${PETSC_NAME}
-
-        echo "PETSC_TAR=${PETSC_TAR}" >> $GITHUB_ENV
-        echo "PETSC_DIR=${PETSC_DIR}" >> $GITHUB_ENV
-        echo "PETSC4PY_DIR=${PETSC_DIR}/src/binding/petsc4py" >> $GITHUB_ENV
 
     - name: PETSc - restore (cache)
       uses: actions/cache/restore@v4
@@ -81,8 +73,10 @@ jobs:
       if: ${{ steps.cache-petsc.outputs.cache-hit != 'true' }}
       run: |
 
-        curl -O -L ${PETSC_BASE_URL}/${PETSC_TAR}
-        tar -xzf ${PETSC_TAR} -C ${LIB_DIR}
+        PETSC_TAR=$PETSC_NAME.tar.gz
+
+        curl -O -L ${PETSC_BASE_URL}/$PETSC_TAR
+        tar -xzf ${PETSC_TAR} -C ${{ github.workspace }}
         cd ${PETSC_DIR}
 
         python configure \
@@ -109,13 +103,48 @@ jobs:
         path: ${{ env.PETSC_DIR }}
         key: ${{ runner.os }}-petsc
 
+  build-petsc4py:
+    name: Build petsc4py
+    needs: build-petsc
+    runs-on: macos-14
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Python - set up ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Python - install dependencies
+      run: |
+
+        # Install build dependencies manually and use --no-build-isolation
+        # We do this to avoid building against numpy 2 as the numpy version is
+        # not specified in petsc4py's requires section
+        pip install cibuildwheel wheel
+
+        # cpython version string representation, e.g., 3.11 -> cp311
+        # py_tag=$(python -c "import sys; print(f'cp{sys.version_info.major}{sys.version_info.minor}')")
+        py_tag=$(python -c 'from wheel.vendored.packaging import tags; print(f"{tags.interpreter_name()}{tags.interpreter_version()}", end="")')
+
+        echo "py_tag=${py_tag}" >> $GITHUB_ENV
+
+    - name: PETSc - set variables
+      run:
+
+        PETSC4PY_DIR=$PETSC_DIR/src/binding/petsc4py
+        echo "PETSC4PY_DIR=$PETSC4PY_DIR" >> $GITHUB_ENV
+        echo "WHEEL_DIR=$PETSC4PY_DIR/wheelhouse" >> $GITHUB_ENV
+
     - name: petsc4py - build
       run: |
 
-        echo "Using PETSC_DIR   ${PETSC_DIR}"
-        echo "Using PETSC_ARCH  ${PETSC_ARCH}"
-
-        WHEEL_DIR=${PETSC4PY_DIR}/wheelhouse
+        echo "Using PETSC_DIR   $PETSC_DIR"
+        echo "Using PETSC_ARCH  $PETSC_ARCH"
 
         # otools -L /path/to/.dylib
 
@@ -136,22 +165,16 @@ jobs:
         # MACOSX_DEPLOYMENT_TARGET to 11.0 which is the minimum target that
         # is supported on arm64 machines. However, currently we build on 14.0
         # so I set this manually for now.
-        cibuildwheel --output-dir ${WHEEL_DIR} ${PETSC4PY_DIR}
-
-        # petsc4py-3.21.3-cp311-cp311-macosx-14_0_arm64.whl
-        WHEEL_FILENAME=${WHEEL_DIR}/*.whl
-
-        echo "WHEEL_DIR=${WHEEL_DIR}" >> $GITHUB_ENV
-        echo "WHEEL_FILENAME=${WHEEL_FILENAME}" >> $GITHUB_ENV
+        cibuildwheel --output-dir $WHEEL_DIR $PETSC4PY_DIR
 
       env:
-        CIBW_BUILD: ${{ env.PYTHON_VERSION_STR }}-*
+        CIBW_BUILD: ${{ env.py_tag }}-*
         CIBW_BEFORE_BUILD: "pip install cython numpy==1.26 setuptools"
         CIBW_BUILD_FRONTEND: "pip; args: --no-build-isolation" # additional args
         MACOSX_DEPLOYMENT_TARGET: "14.0"
 
     - name: petsc4py - install
-      run: pip install ${WHEEL_FILENAME}
+      run: pip install --no-index --find-links $WHEEL_DIR petsc4py
 
     - name: petsc4py - test
       run: python ${PETSC4PY_DIR}/test/runtests.py --summary --no-builddir
@@ -164,7 +187,7 @@ jobs:
 
   test:
     name: Test
-    needs: build
+    needs: build-petsc4py
     runs-on: macos-14
     strategy:
       fail-fast: true

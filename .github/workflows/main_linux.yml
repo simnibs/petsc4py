@@ -8,8 +8,16 @@ on:
   pull_request:
     branches: [ main ]
 
+env:
+  # package versions are set in github actions variables:
+  #   settings - secrets and variables - actions - variables
+  PETSC_ARCH: arch-linux-c-opt
+  PETSC_VERSION: ${{ vars.PETSC_VERSION }}
+  PETSC_NAME: petsc-${{ vars.PETSC_VERSION }}
+  PETSC_DIR: ${{ github.workspace }}/petsc-${{ vars.PETSC_VERSION }}
+
 jobs:
-  build:
+  build-petsc:
     name: Build PETSc
     runs-on: ubuntu-latest
     strategy:
@@ -22,12 +30,6 @@ jobs:
       image: quay.io/pypa/${{ vars.MANYLINUX_PLATFORM }}
 
     env:
-      # package versions are set in github actions variables:
-      #   settings - secrets and variables - actions - variables
-      PETSC_ARCH: arch-linux-c-opt
-      PETSC_VERSION: ${{ vars.PETSC_VERSION }}
-      MPICH_VERSION: ${{ vars.MPICH_VERSION }}
-
       # Compile flags (C/CXX/F)
       # -------------
       # generate position independent code (PIC) meaning that it is insensitive to
@@ -38,12 +40,14 @@ jobs:
       PETSC_FLAGS: -O2 -s -march=x86_64 -fp-model=precise
 
       # store libraries in here
-      LIB_DIR: /custom_libs
+      # LIB_DIR: /custom_libs
+      # LIB_DIR: ${{ github.workspace}}
+
+      MPICH_VERSION: ${{ vars.MPICH_VERSION }}
 
       MPICH_BASE_URL: https://www.mpich.org/static/downloads
       PETSC_BASE_URL: ${{ vars.PETSC_BASE_URL }}
 
-      MKL_VERSION: ${{ vars.MKL_VERSION }}
       MKL_NAME: l_onemkl_p_2024.2.1.105
       MKL_BASE_URL: https://registrationcenter-download.intel.com/akdlm/IRC_NAS/6e00e368-b61d-4f87-a409-9b510c022a37
 
@@ -64,27 +68,19 @@ jobs:
     - name: Prepare
       run: |
 
-        mkdir ${LIB_DIR}
+        # mkdir ${{ github.workspace }}
 
         # Get cpython version string representation
         # Add python to the path
         tmp=${{ matrix.python-version }}
-        python_version_str=cp${tmp/./} # e.g., 3.11 -> cp311
-        echo "python_version_str=${python_version_str}" >> $GITHUB_ENV
-        echo "/opt/python/${python_version_str}-${python_version_str}/bin" >> $GITHUB_PATH
-
-    - name: Python - install dependencies
-      run: |
-
-        # Install build dependencies manually and use --no-build-isolation
-        # We do this to avoid building against numpy 2 as the numpy version is
-        # not specified in petsc4py's "requires" section
-        pip install cython mkl==$MKL_VERSION numpy==1.26
+        py_tag=cp${tmp/./} # e.g., 3.11 -> cp311
+        echo "py_tag=${py_tag}" >> $GITHUB_ENV
+        echo "/opt/python/${py_tag}-${py_tag}/bin" >> $GITHUB_PATH
 
     - name: Intel OneAPI - install MKL
       run: |
 
-        ONEAPI_DIR=${LIB_DIR}/oneAPI
+        ONEAPI_DIR=$GITHUB_WORKSPACE/oneAPI
         curl -O -L ${MKL_BASE_URL}/${MKL_NAME}.sh
 
         # Install
@@ -100,8 +96,8 @@ jobs:
       run: |
 
         MPICH_NAME=mpich-${MPICH_VERSION}
-        MPICH_BUILD_DIR=${LIB_DIR}/${MPICH_NAME}/build
-        MPICH_INSTALL_DIR=${LIB_DIR}/${MPICH_NAME}/install
+        MPICH_BUILD_DIR=$GITHUB_WORKSPACE/${MPICH_NAME}/build
+        MPICH_INSTALL_DIR=$GITHUB_WORKSPACE/${MPICH_NAME}/install
 
         echo "MPICH_NAME=${MPICH_NAME}" >> $GITHUB_ENV
         echo "MPICH_BUILD_DIR=${MPICH_BUILD_DIR}" >> $GITHUB_ENV
@@ -120,7 +116,7 @@ jobs:
       run: |
 
         curl -O -L $MPICH_BASE_URL/${MPICH_VERSION}/${MPICH_NAME}.tar.gz
-        tar -xzf ${MPICH_NAME}.tar.gz -C $LIB_DIR
+        tar -xzf ${MPICH_NAME}.tar.gz -C $GITHUB_WORKSPACE
 
         mkdir $MPICH_BUILD_DIR
         mkdir $MPICH_INSTALL_DIR
@@ -152,17 +148,6 @@ jobs:
         path: ${{ env.MPICH_INSTALL_DIR }}
         key: ${{ runner.os }}-mpich
 
-    - name: PETSc - set variables
-      run: |
-
-        PETSC_NAME=petsc-${PETSC_VERSION}
-        PETSC_TAR=${PETSC_NAME}.tar.gz
-        PETSC_DIR=${LIB_DIR}/${PETSC_NAME}
-
-        echo "PETSC_TAR=${PETSC_TAR}" >> $GITHUB_ENV
-        echo "PETSC_DIR=${PETSC_DIR}" >> $GITHUB_ENV
-        echo "PETSC4PY_DIR=${PETSC_DIR}/src/binding/petsc4py" >> $GITHUB_ENV
-
     - name: PETSc - restore (cache)
       uses: actions/cache/restore@v4
       id: cache-petsc
@@ -174,8 +159,10 @@ jobs:
       if: ${{ steps.cache-petsc.outputs.cache-hit != 'true' }}
       run: |
 
+        PETSC_TAR=$PETSC_NAME.tar.gz
+
         curl -O -L ${PETSC_BASE_URL}/${PETSC_TAR}
-        tar -xzf ${PETSC_TAR} -C ${LIB_DIR}
+        tar -xzf ${PETSC_TAR} -C $GITHUB_WORKSPACE
         cd ${PETSC_DIR}
 
         python configure \
@@ -207,17 +194,45 @@ jobs:
         path: ${{ env.PETSC_DIR }}
         key: ${{ runner.os }}-petsc
 
+  build-petsc4py:
+    name: Build petsc4py
+    needs: build-petsc
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.11"]
+    container:
+      image: quay.io/pypa/${{ vars.MANYLINUX_PLATFORM }}
+
+    steps:
+
+    - name: Python - install dependencies
+      run: |
+
+        # Install build dependencies manually and use --no-build-isolation
+        # We do this to avoid building against numpy 2 as the numpy version is
+        # not specified in petsc4py's "requires" section
+        pip install cython mkl==${{ vars.MKL_VERSION }} numpy==1.26
+
+    - name: petsc4py - set variables
+      run: |
+
+        PETSC4PY_DIR=$PETSC_DIR/src/binding/petsc4py
+        WHEEL_DIR=$PETSC4PY_DIR/wheelhouse
+
+        echo "PETSC4PY_DIR=$PETSC4PY_DIR" >> $GITHUB_ENV
+        echo "WHEEL_DIR=$WHEEL_DIR" >> $GITHUB_ENV
+
     - name: petsc4py - build
       run: |
 
-        echo "Using PETSC_DIR   ${PETSC_DIR}"
-        echo "Using PETSC_ARCH  ${PETSC_ARCH}"
-
-        WHEEL_DIR=${PETSC4PY_DIR}/wheelhouse
+        echo "Using PETSC_DIR   $PETSC_DIR"
+        echo "Using PETSC_ARCH  $PETSC_ARCH"
 
         # petsc4py reads configuration etc. from
         # ${PETSC_DIR}/${PETSC_ARCH}/lib/petsc/conf/petscvariables
-        pip wheel -v --no-deps --no-build-isolation -w ${WHEEL_DIR} ${PETSC4PY_DIR}
+        pip wheel -v --no-deps --no-build-isolation -w $WHEEL_DIR $PETSC4PY_DIR
 
         # env vars defined by manylinux:
         # AUDITWHEEL_PLAT = AUDITWHEEL_POLICY + AUDITWHEEL_ARCH
@@ -225,40 +240,41 @@ jobs:
           --exclude libmkl_core.so.2 \
           --exclude libmkl_intel_lp64.so.2 \
           --exclude libmkl_gnu_thread.so.2 \
-          -w ${WHEEL_DIR} ${WHEEL_DIR}/*.whl
+          -w $WHEEL_DIR $WHEEL_DIR/*.whl
 
         # Filename of the fixed wheel
-        PACKAGE_TAG="petsc4py-${PETSC_VERSION}"
-        PYTHON_ABI_TAG="${python_version_str}-${python_version_str}"
-        WHEEL_FILENAME=${WHEEL_DIR}/${PACKAGE_TAG}-${PYTHON_ABI_TAG}-${AUDITWHEEL_PLAT}.whl
+        package_name_version="petsc4py-$PETSC_VERSION"
+        # PYTHON_ABI_TAG="${py_tag}-${py_tag}"
+        # WHEEL_FILENAME=${WHEEL_DIR}/${package_name_version}-${PYTHON_ABI_TAG}-${AUDITWHEEL_PLAT}.whl
+        WHEEL_FILENAME=$(python tools/construct_wheel_name.py petsc4py $PETSC_VERSION)
+        # WHEEL_FILENAME=${WHEEL_DIR}/${WHEEL_FILENAME}
 
         # We still need to fix some rpaths in the repaired wheel (e.g., point
         # to MKL)
 
         # (1) Unpack
-        wheel unpack ${WHEEL_FILENAME} -d ${WHEEL_DIR}
+        wheel unpack $WHEEL_DIR/$WHEEL_FILENAME -d $WHEEL_DIR
 
         # (2) Fix
         # Enable link with MKL package from PyPI
         # add rpath entry to .../lib/
         # from .../lib/pythonX.Y/site-packages/petsc4py/lib/arch-X/
-        patchelf --add-rpath \$ORIGIN/../../../../.. ${WHEEL_DIR}/${PACKAGE_TAG}/petsc4py/lib/${PETSC_ARCH}/PETSc*.so
+        patchelf --add-rpath \$ORIGIN/../../../../.. ${WHEEL_DIR}/${package_name_version}/petsc4py/lib/${PETSC_ARCH}/PETSc*.so
         # from .../lib/pythonX.Y/site-packages/petsc4py.libs/
-        patchelf --add-rpath \$ORIGIN/../../.. ${WHEEL_DIR}/${PACKAGE_TAG}/petsc4py.libs/libpetsc*
-        patchelf --add-rpath \$ORIGIN/../../.. ${WHEEL_DIR}/${PACKAGE_TAG}/petsc4py.libs/libHYPRE*
+        patchelf --add-rpath \$ORIGIN/../../.. ${WHEEL_DIR}/${package_name_version}/petsc4py.libs/libpetsc*
+        patchelf --add-rpath \$ORIGIN/../../.. ${WHEEL_DIR}/${package_name_version}/petsc4py.libs/libHYPRE*
 
         # It seems that libmpifort does not get $ORIGIN in rpath although it
         # requires pciaccess, so fix that
-        patchelf --set-rpath \$ORIGIN ${WHEEL_DIR}/${PACKAGE_TAG}/petsc4py.libs/libmpi*
+        patchelf --set-rpath \$ORIGIN ${WHEEL_DIR}/${package_name_version}/petsc4py.libs/libmpi*
 
         # (3) pack the modified wheel
-        wheel pack ${WHEEL_DIR}/${PACKAGE_TAG} -d ${WHEEL_DIR}
+        wheel pack ${WHEEL_DIR}/${package_name_version} -d ${WHEEL_DIR}
 
-        echo "WHEEL_DIR=${WHEEL_DIR}" >> $GITHUB_ENV
-        echo "WHEEL_FILENAME=${WHEEL_FILENAME}" >> $GITHUB_ENV
+        # echo "WHEEL_FILENAME=${WHEEL_FILENAME}" >> $GITHUB_ENV
 
     - name: petsc4py - install
-      run: pip install ${WHEEL_FILENAME}
+      run: pip install --no-index --find-links $WHEEL_DIR petsc4py
 
     - name: petsc4py - test
       run: python ${PETSC4PY_DIR}/test/runtests.py --summary --no-builddir
@@ -271,7 +287,7 @@ jobs:
 
   test:
     name: Test
-    needs: build
+    needs: build-petsc4py
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
@@ -293,8 +309,8 @@ jobs:
         # Get cpython version string representation
         # Add python to the path
         tmp=${{ matrix.python-version }}
-        python_version_str=cp${tmp/./} # e.g., 3.11 -> cp311
-        echo "/opt/python/${python_version_str}-${python_version_str}/bin" >> $GITHUB_PATH
+        py_tag=cp${tmp/./} # e.g., 3.11 -> cp311
+        echo "/opt/python/${py_tag}-${py_tag}/bin" >> $GITHUB_PATH
 
     - name: python - install packages
       run: |
