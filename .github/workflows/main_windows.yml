@@ -10,7 +10,7 @@ on:
 
 jobs:
   build:
-    name: Build and Upload Artifact
+    name: Build PETSc and petsc4py
     runs-on: windows-2022
     strategy:
       fail-fast: true

@@ -8,17 +8,10 @@ on:
   pull_request:
     branches: [ main ]
 
-env:
-  # package versions are set in github actions variables:
-  #   settings - secrets and variables - actions - variables
-  PETSC_ARCH: arch-linux-c-opt
-  PETSC_VERSION: ${{ vars.PETSC_VERSION }}
-  PETSC_NAME: petsc-${{ vars.PETSC_VERSION }}
-  PETSC_DIR: ${{ github.workspace }}/petsc-${{ vars.PETSC_VERSION }}
 
 jobs:
-  build-petsc:
-    name: Build PETSc
+  build:
+    name: Build PETSc and petsc4py
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
@@ -30,6 +23,15 @@ jobs:
       image: quay.io/pypa/${{ vars.MANYLINUX_PLATFORM }}
 
     env:
+
+      # package versions are set in github actions variables:
+      #   settings - secrets and variables - actions - variables
+      PETSC_ARCH: arch-linux-c-opt
+      PETSC_VERSION: ${{ vars.PETSC_VERSION }}
+      PETSC_NAME: petsc-${{ vars.PETSC_VERSION }}
+      PETSC_DIR: ${{ github.workspace }}/petsc-${{ vars.PETSC_VERSION }}
+      PETSC4PY_NAME: petsc4py-${{ vars.PETSC_VERSION }}
+
       # Compile flags (C/CXX/F)
       # -------------
       # generate position independent code (PIC) meaning that it is insensitive to
@@ -194,19 +196,6 @@ jobs:
         path: ${{ env.PETSC_DIR }}
         key: ${{ runner.os }}-petsc
 
-  build-petsc4py:
-    name: Build petsc4py
-    needs: build-petsc
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-      matrix:
-        python-version: ["3.11"]
-    container:
-      image: quay.io/pypa/${{ vars.MANYLINUX_PLATFORM }}
-
-    steps:
-
     - name: Python - install dependencies
       run: |
 
@@ -219,10 +208,9 @@ jobs:
       run: |
 
         PETSC4PY_DIR=$PETSC_DIR/src/binding/petsc4py
-        WHEEL_DIR=$PETSC4PY_DIR/wheelhouse
 
         echo "PETSC4PY_DIR=$PETSC4PY_DIR" >> $GITHUB_ENV
-        echo "WHEEL_DIR=$WHEEL_DIR" >> $GITHUB_ENV
+        echo "WHEEL_DIR=$PETSC4PY_DIR/wheelhouse" >> $GITHUB_ENV
 
     - name: petsc4py - build
       run: |
@@ -243,7 +231,7 @@ jobs:
           -w $WHEEL_DIR $WHEEL_DIR/*.whl
 
         # Filename of the fixed wheel
-        package_name_version="petsc4py-$PETSC_VERSION"
+
         # PYTHON_ABI_TAG="${py_tag}-${py_tag}"
         # WHEEL_FILENAME=${WHEEL_DIR}/${package_name_version}-${PYTHON_ABI_TAG}-${AUDITWHEEL_PLAT}.whl
         WHEEL_FILENAME=$(python tools/construct_wheel_name.py petsc4py $PETSC_VERSION)
@@ -259,17 +247,17 @@ jobs:
         # Enable link with MKL package from PyPI
         # add rpath entry to .../lib/
         # from .../lib/pythonX.Y/site-packages/petsc4py/lib/arch-X/
-        patchelf --add-rpath \$ORIGIN/../../../../.. ${WHEEL_DIR}/${package_name_version}/petsc4py/lib/${PETSC_ARCH}/PETSc*.so
+        patchelf --add-rpath \$ORIGIN/../../../../.. $WHEEL_DIR/$PETSC4PY_NAME/petsc4py/lib/$PETSC_ARCH/PETSc*.so
         # from .../lib/pythonX.Y/site-packages/petsc4py.libs/
-        patchelf --add-rpath \$ORIGIN/../../.. ${WHEEL_DIR}/${package_name_version}/petsc4py.libs/libpetsc*
-        patchelf --add-rpath \$ORIGIN/../../.. ${WHEEL_DIR}/${package_name_version}/petsc4py.libs/libHYPRE*
+        patchelf --add-rpath \$ORIGIN/../../.. $WHEEL_DIR/$PETSC4PY_NAME/petsc4py.libs/libpetsc*
+        patchelf --add-rpath \$ORIGIN/../../.. $WHEEL_DIR/$PETSC4PY_NAME/petsc4py.libs/libHYPRE*
 
         # It seems that libmpifort does not get $ORIGIN in rpath although it
         # requires pciaccess, so fix that
-        patchelf --set-rpath \$ORIGIN ${WHEEL_DIR}/${package_name_version}/petsc4py.libs/libmpi*
+        patchelf --set-rpath \$ORIGIN $WHEEL_DIR/$PETSC4PY_NAME/petsc4py.libs/libmpi*
 
         # (3) pack the modified wheel
-        wheel pack ${WHEEL_DIR}/${package_name_version} -d ${WHEEL_DIR}
+        wheel pack $WHEEL_DIR/$PETSC4PY_NAME -d ${WHEEL_DIR}
 
         # echo "WHEEL_FILENAME=${WHEEL_FILENAME}" >> $GITHUB_ENV
 
@@ -277,7 +265,7 @@ jobs:
       run: pip install --no-index --find-links $WHEEL_DIR petsc4py
 
     - name: petsc4py - test
-      run: python ${PETSC4PY_DIR}/test/runtests.py --summary --no-builddir
+      run: python $PETSC4PY_DIR/test/runtests.py --summary --no-builddir
 
     - name: Artifact - upload
       uses: actions/upload-artifact@v4
@@ -287,7 +275,7 @@ jobs:
 
   test:
     name: Test
-    needs: build-petsc4py
+    needs: build
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true

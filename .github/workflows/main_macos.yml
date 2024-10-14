@@ -8,17 +8,9 @@ on:
   pull_request:
     branches: [ main ]
 
-
-env:
-  # package versions are set in github actions variables:
-  #   settings - secrets and variables - actions - variables
-  PETSC_ARCH: arch-darwin-c-opt
-  PETSC_NAME: petsc-${{ vars.PETSC_VERSION }}
-  PETSC_DIR: ${{ github.workspace }}/petsc-${{ vars.PETSC_VERSION }}
-
 jobs:
-  build-petsc:
-    name: Build PETSc
+  build:
+    name: Build PETSc and petsc4py
     runs-on: macos-14
     strategy:
       fail-fast: true
@@ -26,6 +18,13 @@ jobs:
         python-version: ["3.11"]
 
     env:
+      # package versions are set in github actions variables:
+      #   settings - secrets and variables - actions - variables
+      PETSC_ARCH: arch-darwin-c-opt
+      PETSC_NAME: petsc-${{ vars.PETSC_VERSION }}
+      PETSC_DIR: ${{ github.workspace }}/petsc-${{ vars.PETSC_VERSION }}
+      PETSC4PY_NAME: petsc4py-${{ vars.PETSC_VERSION }}
+
       PETSC_FLAGS: -O2 # C, CXX, F
 
       PETSC_BASE_URL: ${{ vars.PETSC_BASE_URL }}
@@ -75,15 +74,15 @@ jobs:
 
         PETSC_TAR=$PETSC_NAME.tar.gz
 
-        curl -O -L ${PETSC_BASE_URL}/$PETSC_TAR
-        tar -xzf ${PETSC_TAR} -C ${{ github.workspace }}
-        cd ${PETSC_DIR}
+        curl -O -L $PETSC_BASE_URL/$PETSC_TAR
+        tar -xzf $PETSC_TAR -C ${{ github.workspace }}
+        cd $PETSC_DIR
 
         python configure \
-        --PETSC_ARCH=${PETSC_ARCH} \
-        --COPTFLAGS=${PETSC_FLAGS} \
-        --CXXOPTFLAGS=${PETSC_FLAGS} \
-        --FOPTFLAGS=${PETSC_FLAGS} \
+        --PETSC_ARCH=$PETSC_ARCH \
+        --COPTFLAGS=$PETSC_FLAGS \
+        --CXXOPTFLAGS=$PETSC_FLAGS \
+        --FOPTFLAGS=$PETSC_FLAGS \
         --with-fc=gfortran-14 \
         --with-fortran-bindings=0 \
         --with-debugging=0 \
@@ -103,22 +102,6 @@ jobs:
         path: ${{ env.PETSC_DIR }}
         key: ${{ runner.os }}-petsc
 
-  build-petsc4py:
-    name: Build petsc4py
-    needs: build-petsc
-    runs-on: macos-14
-    strategy:
-      fail-fast: true
-      matrix:
-        python-version: ["3.11"]
-
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v3
-    - name: Python - set up ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
     - name: Python - install dependencies
       run: |
 
@@ -137,6 +120,7 @@ jobs:
       run:
 
         PETSC4PY_DIR=$PETSC_DIR/src/binding/petsc4py
+
         echo "PETSC4PY_DIR=$PETSC4PY_DIR" >> $GITHUB_ENV
         echo "WHEEL_DIR=$PETSC4PY_DIR/wheelhouse" >> $GITHUB_ENV
 
@@ -177,7 +161,7 @@ jobs:
       run: pip install --no-index --find-links $WHEEL_DIR petsc4py
 
     - name: petsc4py - test
-      run: python ${PETSC4PY_DIR}/test/runtests.py --summary --no-builddir
+      run: python $PETSC4PY_DIR/test/runtests.py --summary --no-builddir
 
     - name: Artifact - upload
       uses: actions/upload-artifact@v4
@@ -187,7 +171,7 @@ jobs:
 
   test:
     name: Test
-    needs: build-petsc4py
+    needs: build
     runs-on: macos-14
     strategy:
       fail-fast: true
