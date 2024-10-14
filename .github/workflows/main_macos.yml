@@ -158,7 +158,10 @@ jobs:
         MACOSX_DEPLOYMENT_TARGET: "14.0"
 
     - name: petsc4py - install
-      run: pip install --no-index --find-links $WHEEL_DIR petsc4py
+      run: |
+
+        pip install numpy==1.26
+        pip install --no-index --find-links $WHEEL_DIR petsc4py
 
     - name: petsc4py - test
       run: python $PETSC4PY_DIR/test/runtests.py --summary --no-builddir
