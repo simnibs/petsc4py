@@ -117,7 +117,7 @@ jobs:
         echo "py_tag=${py_tag}" >> $GITHUB_ENV
 
     - name: PETSc - set variables
-      run:
+      run: |
 
         PETSC4PY_DIR=$PETSC_DIR/src/binding/petsc4py
 
