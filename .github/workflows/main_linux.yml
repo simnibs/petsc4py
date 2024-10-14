@@ -231,11 +231,7 @@ jobs:
           -w $WHEEL_DIR $WHEEL_DIR/*.whl
 
         # Filename of the fixed wheel
-
-        # PYTHON_ABI_TAG="${py_tag}-${py_tag}"
-        # WHEEL_FILENAME=${WHEEL_DIR}/${package_name_version}-${PYTHON_ABI_TAG}-${AUDITWHEEL_PLAT}.whl
-        WHEEL_FILENAME=$(python tools/construct_wheel_name.py petsc4py $PETSC_VERSION)
-        # WHEEL_FILENAME=${WHEEL_DIR}/${WHEEL_FILENAME}
+        WHEEL_FILENAME=$(python tools/construct_wheel_name.py petsc4py $PETSC_VERSION --platform-tag $AUDITWHEEL_PLAT)
 
         # We still need to fix some rpaths in the repaired wheel (e.g., point
         # to MKL)
@@ -258,8 +254,6 @@ jobs:
 
         # (3) pack the modified wheel
         wheel pack $WHEEL_DIR/$PETSC4PY_NAME -d ${WHEEL_DIR}
-
-        # echo "WHEEL_FILENAME=${WHEEL_FILENAME}" >> $GITHUB_ENV
 
     - name: petsc4py - install
       run: pip install --no-index --find-links $WHEEL_DIR petsc4py

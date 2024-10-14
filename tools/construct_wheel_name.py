@@ -3,9 +3,9 @@ from pip._vendor.distlib.wheel import ABI, ARCH, IMPVER
 import sys
 
 def parse_args(argv):
-    description = "Main interface to training a BrainNet model. For convenience, a few parameters are exposed on the command line. Values provided here will overwrite those set in the configuration file."
+    description = "Construct a wheel name based on parts as specified or obtained from the system."
     parser = argparse.ArgumentParser(
-        prog="blabla",
+        prog="Wheel name constructor",
         description=description,
     )
     parser.add_argument(
