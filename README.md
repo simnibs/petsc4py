@@ -1,8 +1,6 @@
-# PETSc4py with Precompiled PETSc Libraries
+# petsc4py with Precompiled PETSc Libraries
 
 This repository provides [petsc4py](https://petsc.org/main/petsc4py/reference/petsc4py.html) wheels with precompiled libraries. Wheels are available for Windows, Linux, and (ARM64) MacOS.
-
-
 
 Below is an overview over what components PETSc is built with on different platforms.
 
@@ -16,6 +14,7 @@ Below is an overview over what components PETSc is built with on different platf
 | MKL PARDISO   | x          |           | x         |
 | MUMPS         |            | x         |           |
 
+Versions and tags of this repository follow the PETSc version on which petsc4py is based.
 
 ## TODOs
 
@@ -31,17 +30,3 @@ Below is an overview over what components PETSc is built with on different platf
 - Solve phase of MUMPS is slower than python-mumps. Why?
 - MUMPS seems to be statically compiled even with shared-library=1?
 - Currently, I set `MACOSX_DEPLOYMENT_TARGET` to 14.0 manually since `cibuildwheel` defaults to 11. I don't know if using 11 would case problems. The current M1 mac runners on GitHub Actions uses MacOS 14.
-
-pip install git+https://github.com/jduemose/simple-petsc4py@v3.21.5
-
-python -m pip install 'simple-petsc4py@git+https://github.com/jduemose/simple-petsc4py.git@3.21.5'
-
-pip install git+https://github.com/jduemose/simple-petsc4py.git@v3.21.5
-
-pip install https://github.com/jduemose/simple-petsc4py/releases/download/v3.21.5/petsc4py-3.21.5-cp311-cp311-manylinux_2_28_x86_64.whl
-
-pip install -f git+https://github.com/jduemose/simple-petsc4py/releases/tag/v3.21.5
-
-
-
-pip install --no-index --only-binary --find-links https://github.com/jduemose/simple-petsc4py/releases/tag/v3.21.5 petsc4py
