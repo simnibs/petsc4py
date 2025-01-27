@@ -153,14 +153,14 @@ jobs:
 
       env:
         CIBW_BUILD: ${{ env.py_tag }}-*
-        CIBW_BEFORE_BUILD: "pip install cython numpy==1.26 setuptools"
+        CIBW_BEFORE_BUILD: "pip install cython numpy==${{ version.NUMPY_VERSION }} setuptools"
         CIBW_BUILD_FRONTEND: "pip; args: --no-build-isolation" # additional args
         MACOSX_DEPLOYMENT_TARGET: "14.0"
 
     - name: petsc4py - install
       run: |
 
-        pip install numpy==1.26
+        pip install numpy==${{ version.NUMPY_VERSION }}
         pip install --no-index --find-links $WHEEL_DIR petsc4py
 
     - name: petsc4py - test
@@ -194,7 +194,7 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Python - install packages
       run: |
-        pip install numpy==1.26 pytest scipy
+        pip install numpy==${{ version.NUMPY_VERSION }} pytest scipy
         pip install --no-index --find-links $GITHUB_WORKSPACE petsc4py
     - name: petsc4py - test
       run: pytest tests -v
