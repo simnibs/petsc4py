@@ -224,7 +224,7 @@ jobs:
         REM We do this to avoid building against numpy 2 as the numpy version is
         REM not specified in petsc4py's requires section
 
-        pip install cython delvewheel mkl==${{ vars.MKL_VERSION }} numpy==${{ version.NUMPY_VERSION }} wheel
+        pip install cython delvewheel mkl==${{ vars.MKL_VERSION }} numpy==${{ vars.NUMPY_VERSION }} wheel
 
     - name: Set miscellaneous variables
       shell: pwsh
@@ -338,7 +338,7 @@ jobs:
       shell: pwsh
       # Get-ChildItem petsc4py*.whl | foreach {pip install $_.FullName}
       run: |
-        pip install mkl==${{ vars.MKL_VERSION }} numpy==${{ version.NUMPY_VERSION }} pytest scipy
+        pip install mkl==${{ vars.MKL_VERSION }} numpy==${{ vars.NUMPY_VERSION }} pytest scipy
         pip install --no-index --find-links $Env:GITHUB_WORKSPACE petsc4py
     - name: petsc4py - test
       run: pytest tests -v

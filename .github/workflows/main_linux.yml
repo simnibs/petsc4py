@@ -296,7 +296,7 @@ jobs:
 
     - name: python - install packages
       run: |
-        pip install mkl==${{ vars.MKL_VERSION}} numpy==${{ version.NUMPY_VERSION }} pytest scipy
+        pip install mkl==${{ vars.MKL_VERSION}} numpy==${{ vars.NUMPY_VERSION }} pytest scipy
         pip install --no-index --find-links $GITHUB_WORKSPACE petsc4py
     - name: petsc4py - test
       run: pytest tests -v
