@@ -202,7 +202,7 @@ jobs:
         # Install build dependencies manually and use --no-build-isolation
         # We do this to avoid building against numpy 2 as the numpy version is
         # not specified in petsc4py's "requires" section
-        pip install cython mkl==${{ vars.MKL_VERSION }} numpy==${{ version.NUMPY_VERSION }}
+        pip install cython mkl==${{ vars.MKL_VERSION }} numpy==${{ vars.NUMPY_VERSION }}
 
     - name: petsc4py - set variables
       run: |
